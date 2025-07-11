@@ -1,0 +1,25 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "lint": "eslint . --ext .ts --fix",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "prestart": "npm run build",
+    "start": "concurrently --kill-others \"npm run watch\" \"nodemon .\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.36.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "concurrently": "^9.2.0",
+    "eslint": "^9.30.1",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.8.3"
+  }
+}
