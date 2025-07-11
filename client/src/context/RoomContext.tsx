@@ -16,6 +16,7 @@ const WS = "http://localhost:3000";
 interface RoomContextType {
   ws: Socket;
   me?: Peer;
+  stream: MediaStream;
 }
 
 interface Props {
@@ -28,6 +29,7 @@ const ws = socketIOClient(WS);
 const RoomProvider: React.FC<Props> = ({ children }) => {
   const navigate = useNavigate();
   const [me, setMe] = useState<Peer>();
+  const [stream, setStream] = useState<MediaStream>();
 
   const enterRoom = ({ roomId }: { roomId: string }) => {
     console.log({ roomId });
@@ -53,13 +55,36 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
     const peer = new Peer(meId);
     setMe(peer);
 
+    try {
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          setStream(stream);
+        });
+    } catch (error) {
+      console.error(error);
+    }
+
     ws.on("room-created", enterRoom);
     ws.on("get-users", getUsers);
     ws.on("user-leaved", leavedUser);
   }, []);
 
+  useEffect(() => {
+    if (!me || !stream) return;
+    ws.on("user-joined", ({ peerId }) => {
+      const call = me.call(peerId, stream);
+    });
+
+    me.on("call", (call) => {
+      call.answer(stream);
+    });
+  }, [me, stream]);
+
   return (
-    <RoomContext.Provider value={{ ws, me }}>{children}</RoomContext.Provider>
+    <RoomContext.Provider value={{ ws, me, stream }}>
+      {children}
+    </RoomContext.Provider>
   );
 };
 
