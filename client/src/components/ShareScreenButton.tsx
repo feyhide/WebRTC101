@@ -1,17 +1,12 @@
-import type React from "react";
-import { useRoom } from "../context/RoomContext";
+interface Props {
+  handleShareScreen: () => void;
+}
 
-const CreateButton: React.FC = () => {
-  const { ws } = useRoom();
-
-  const createRoom = () => {
-    ws.emit("create-room");
-  };
-
+export default function ShareScreenButton({ handleShareScreen }: Props) {
   return (
     <button
-      onClick={createRoom}
-      className="w-fit h-fit rounded-lg px-8 py-2 bg-black/30 text-white"
+      onClick={handleShareScreen}
+      className="w-fit h-fit rounded-lg px-4 py-2 bg-black/30 text-white"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -29,6 +24,4 @@ const CreateButton: React.FC = () => {
       </svg>
     </button>
   );
-};
-
-export default CreateButton;
+}
