@@ -3,9 +3,10 @@ import { useEffect, useRef } from "react";
 
 interface Props {
   stream?: MediaStream;
+  videoStyling?: string;
 }
 
-export default function VideoPlayer({ stream }: Props) {
+export default function VideoPlayer({ videoStyling, stream }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export default function VideoPlayer({ stream }: Props) {
       autoPlay
       playsInline
       muted
-      className="w-64 h-48 object-cover rounded-md shadow-md border"
+      className={`${videoStyling} object-contain rounded-md shadow-md border`}
     />
   );
 }
