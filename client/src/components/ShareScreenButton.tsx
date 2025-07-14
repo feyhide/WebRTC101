@@ -1,11 +1,10 @@
-interface Props {
-  handleShareScreen: () => void;
-}
+import { useRoom } from "../context/RoomContext";
 
-export default function ShareScreenButton({ handleShareScreen }: Props) {
+export default function ShareScreenButton() {
+  const { meScreen, shareScreen, stopScreenShare, screenSharingId } = useRoom();
   return (
     <button
-      onClick={handleShareScreen}
+      onClick={screenSharingId === meScreen?.id ? stopScreenShare : shareScreen}
       className="w-fit h-fit rounded-lg px-4 py-2 bg-black/30 text-white"
     >
       <svg

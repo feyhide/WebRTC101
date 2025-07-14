@@ -6,8 +6,7 @@ import type { PeerState } from "../context/peerReducer";
 import ShareScreenButton from "../components/ShareScreenButton";
 
 function Room() {
-  const { ws, me, stream, peers, shareScreen, screenSharingId, setRoomId } =
-    useRoom();
+  const { ws, me, stream, peers, screenSharingId, setRoomId } = useRoom();
   const { id } = useParams();
 
   useEffect(() => {
@@ -23,10 +22,6 @@ function Room() {
   const screenSharingVideo =
     screenSharingId === me?.id ? stream : peers[screenSharingId]?.stream;
 
-  useEffect(() => {
-    console.log("screen sharing id: ", screenSharingId);
-  }, [screenSharingId]);
-
   return (
     <div className="relative w-screen h-screen flex p-5 flex-col items-center bg-gradient-to-b from-blue-500 to-white">
       <div className="bg-white/80 border-4 border-blue-500 px-4 py-2 rounded-xl">
@@ -38,6 +33,7 @@ function Room() {
             <VideoPlayer
               videoStyling={"max-w-full max-h-full"}
               stream={screenSharingVideo}
+              label={`Screen Sharing: ${screenSharingId}`}
             />
           </div>
         )}
@@ -49,18 +45,23 @@ function Room() {
           <VideoPlayer
             videoStyling={"w-auto h-full bg-black"}
             stream={stream}
+            label={`Me: ${me?.id}`}
           />
-          {Object.values(peers as PeerState).map((peer) => (
-            <VideoPlayer
-              videoStyling={"w-auto h-full bg-black"}
-              stream={peer.stream}
-            />
-          ))}
+          {Object.entries(peers as PeerState)
+            .filter(([peerId]) => peerId !== screenSharingId)
+            .map(([peerId, peer]) => (
+              <VideoPlayer
+                key={peerId}
+                videoStyling={"w-auto h-full bg-black"}
+                stream={peer.stream}
+                label={`Peer: ${peerId}`}
+              />
+            ))}
         </div>
       </div>
 
       <div className="fixed bottom-10">
-        <ShareScreenButton handleShareScreen={shareScreen} />
+        <ShareScreenButton />
       </div>
     </div>
   );

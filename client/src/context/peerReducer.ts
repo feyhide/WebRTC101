@@ -15,10 +15,8 @@ type RemovePeerAction = {
 type PeerAction = AddPeerAction | RemovePeerAction;
 
 export const peerReducer = (state: PeerState, action: PeerAction) => {
-  console.log("peerReducer received:", action);
   switch (action.type) {
     case ADD_PEER:
-      console.log("Adding peer:", action.payload.peerId);
       return {
         ...state,
         [action.payload.peerId]: {
@@ -26,7 +24,6 @@ export const peerReducer = (state: PeerState, action: PeerAction) => {
         },
       };
     case REMOVE_PEER: {
-      console.log("Removing peer:", action.payload.peerId);
       const { [action.payload.peerId]: deleted, ...rest } = state;
       return rest;
     }

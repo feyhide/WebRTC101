@@ -15,6 +15,7 @@ import { Socket, io as socketIOClient } from "socket.io-client";
 import { v4 as uuidV4 } from "uuid";
 import { peerReducer, type PeerState } from "./peerReducer";
 import { addPeerAction, removePeerAction } from "./peerActions";
+import { limitSenderBitrate } from "../helper/VideoBitRateLimiter";
 
 const WS = "http://localhost:3000";
 const ws = socketIOClient(WS);
@@ -22,11 +23,13 @@ const ws = socketIOClient(WS);
 interface RoomContextType {
   ws: Socket;
   me?: Peer;
+  meScreen?: Peer;
   stream?: MediaStream;
   peers: PeerState;
   shareScreen: () => void;
   screenSharingId: string;
   setRoomId: React.Dispatch<React.SetStateAction<string>>;
+  stopScreenShare: () => void;
 }
 
 interface Props {
@@ -38,91 +41,158 @@ const RoomContext = createContext<RoomContextType | null>(null);
 const RoomProvider: React.FC<Props> = ({ children }) => {
   const navigate = useNavigate();
   const [me, setMe] = useState<Peer>();
+  const [meScreen, setMeScreen] = useState<Peer>();
   const [stream, setStream] = useState<MediaStream>();
   const [peers, dispatch] = useReducer(peerReducer, {});
   const [screenSharingId, setScreenSharingId] = useState<string>("");
   const [roomId, setRoomId] = useState<string>("");
 
   const peerConnections = useRef<Map<string, MediaConnection>>(new Map());
+  const screenSocketRef = useRef<Socket | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
 
-  const switchStream = (newStream: MediaStream) => {
-    stream?.getTracks().forEach((track) => track.stop());
-
-    peerConnections.current.forEach((conn) => {
-      const sender = conn.peerConnection
-        .getSenders()
-        .find((s) => s.track?.kind === "video");
-      const newVideoTrack = newStream.getVideoTracks()[0];
-      if (sender && newVideoTrack) {
-        sender.replaceTrack(newVideoTrack).catch(console.error);
-      }
-    });
-
-    setStream(newStream);
-  };
+  // screen impersonating as another cute peer trying to connect
+  // little does my app knows how weird this second cute peer is hehe
 
   const shareScreen = () => {
-    if (screenSharingId && screenSharingId !== me?.id) {
+    if (screenSharingId) {
       alert("Someone is already sharing their screen.");
       return;
     }
-    if (screenSharingId === me?.id) {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: true })
-        .then((camStream) => {
-          switchStream(camStream);
-          setScreenSharingId("");
+
+    if (screenSharingId === meScreen?.id) {
+      alert("Bruhhh.");
+      return;
+    }
+
+    const screenId = uuidV4();
+    console.info(`[Screen] Generated ID: ${screenId}`);
+
+    navigator.mediaDevices
+      .getDisplayMedia({
+        video: {
+          frameRate: 10,
+          width: { max: 1280 },
+          height: { max: 720 },
+        },
+        audio: false,
+      })
+      .then((screenStream) => {
+        console.info("[Screen] Got display media stream");
+        screenStreamRef.current = screenStream;
+
+        const peer = new Peer(screenId, {
+          host: "localhost",
+          port: 9000,
+          path: "/myapp",
+          config: {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          },
         });
-    } else {
-      navigator.mediaDevices
-        .getDisplayMedia({ video: true })
-        .then((screenStream) => {
-          switchStream(screenStream);
-          if (me?.id) setScreenSharingId(me.id);
+
+        peer.on("open", (id) => {
+          setMeScreen(peer);
+          console.info(`[Screen] Peer open with ID: ${id}`);
+
+          const screenSocket = socketIOClient(WS);
+          screenSocketRef.current = screenSocket;
+
+          screenSocket.emit("join-room", { roomId, peerId: id });
+
+          screenSocket.emit("start-sharing", { peerId: id, roomId });
+
+          screenSocket.on("user-joined", ({ peerId }) => {
+            if (peerId === me?.id) return;
+
+            console.info(`[Screen] Calling new joiner ${peerId}`);
+            const call = peer.call(peerId, screenStream);
+            if (call) {
+              limitSenderBitrate(call);
+              peerConnections.current.set(peerId, call);
+            }
+          });
+
+          peer.on("call", (call) => {
+            console.info(`[Screen] Incoming call from ${call.peer}`);
+            call.answer(screenStream);
+            peerConnections.current.set(call.peer, call);
+
+            call.on("stream", () => {
+              console.log("[Screen] got stream from main cam (ignored).");
+            });
+
+            call.on("close", () => {
+              peerConnections.current.delete(call.peer);
+            });
+          });
 
           screenStream.getVideoTracks()[0].addEventListener("ended", () => {
-            navigator.mediaDevices
-              .getUserMedia({ video: true, audio: true })
-              .then((camStream) => {
-                switchStream(camStream);
-                setScreenSharingId("");
-              });
+            stopScreenShare();
           });
         });
-    }
+
+        peer.on("error", (err) => {
+          console.error("[Screen] Peer error:", err);
+        });
+      })
+      .catch((err) => console.error("[Screen] Failed to share screen:", err));
   };
+
+  const stopScreenShare = () => {
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+
+    if (meScreen) {
+      meScreen.destroy();
+      setMeScreen(undefined);
+    }
+
+    if (screenSocketRef.current) {
+      screenSocketRef.current.emit("stop-sharing", roomId);
+      screenSocketRef.current.disconnect();
+      screenSocketRef.current = null;
+    }
+
+    console.info("[Screen] Stopped sharing and cleaned up");
+  };
+
+  // ----- ended screen peer thingy -----
 
   const callPeer = useCallback(
     (peerId: string, localStream: MediaStream) => {
       if (!me) return;
+
       const call = me.call(peerId, localStream);
       if (!call) {
-        console.warn("Call object is undefined");
+        console.warn("[Call] Call object is undefined");
         return;
       }
 
+      limitSenderBitrate(call);
       peerConnections.current.set(peerId, call);
-      console.log("Calling peer:", peerId);
+      console.info(`[Call] Calling ${peerId}`);
 
       call.on("stream", (peerStream) => {
-        console.log("Got remote stream from:", peerId);
-        dispatch(addPeerAction(peerId, peerStream));
+        if (!peers[peerId]) {
+          console.info(`[Call] Received remote stream from ${peerId}`);
+          dispatch(addPeerAction(peerId, peerStream));
+        }
       });
 
-      call.on("error", (err) => {
-        console.error("Call error:", err);
-      });
+      call.on("error", (err) =>
+        console.error(`[Call] Error with ${peerId}:`, err)
+      );
 
       call.on("close", () => {
         peerConnections.current.delete(peerId);
-        console.log("Call with", peerId, "closed");
+        console.info(`[Call] Call with ${peerId} closed`);
       });
     },
-    [me, dispatch]
+    [me, peers]
   );
 
   const enterRoom = ({ roomId }: { roomId: string }) => {
-    console.log({ roomId });
+    console.info(`[Room] Entered: ${roomId}`);
     navigate(`/room/${roomId}`);
   };
 
@@ -133,11 +203,11 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
     roomId: string;
     participants: string[];
   }) => {
-    console.log(`Room:${roomId} has participants as follows`, { participants });
+    console.info(`[Room] ${roomId} users:`, participants);
   };
 
   const leavedUser = ({ peerId }: { peerId: string }) => {
-    console.log(`User:${peerId} leaved the room`);
+    console.info(`[Room] ${peerId} left`);
     dispatch(removePeerAction(peerId));
     peerConnections.current.delete(peerId);
   };
@@ -152,12 +222,19 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
 
   useEffect(() => {
     const meId = uuidV4();
-    console.log("Generated Peer ID:", meId);
+    console.info(`[Init] Peer ID: ${meId}`);
 
     navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
+      .getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true,
+      })
       .then((localStream) => {
-        console.log("Got local stream");
+        console.info("[Init] Got user media");
         setStream(localStream);
 
         const peer = new Peer(meId, {
@@ -171,16 +248,18 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
 
         peer.on("open", (id) => {
           setMe(peer);
-          console.log("Peer connection opened with ID:", id);
+          console.info(`[Init] Peer connected: ${id}`);
 
           peer.on("call", (call) => {
-            console.log("Incoming call from:", call.peer);
+            console.info(`[Call] Incoming from ${call.peer}`);
             call.answer(localStream);
             peerConnections.current.set(call.peer, call);
 
             call.on("stream", (peerStream) => {
-              console.log("Received remote stream from:", call.peer);
-              dispatch(addPeerAction(call.peer, peerStream));
+              console.info(`[Call] Got stream from ${call.peer}`);
+              if (!peers[call.peer]) {
+                dispatch(addPeerAction(call.peer, peerStream));
+              }
             });
 
             call.on("close", () => {
@@ -189,13 +268,9 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
           });
         });
 
-        peer.on("error", (err) => {
-          console.error("Peer error:", err);
-        });
+        peer.on("error", (err) => console.error("[Init] Peer error:", err));
       })
-      .catch((err) => {
-        console.error("Error getting user media:", err);
-      });
+      .catch((err) => console.error("[Init] Failed to get user media:", err));
 
     ws.on("room-created", enterRoom);
     ws.on("get-users", getUsers);
@@ -213,40 +288,34 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (screenSharingId === "") return;
-
-    console.log("sending everyone that i start sharing or stop");
-    ws.emit(
-      screenSharingId ? "start-sharing" : "stop-sharing",
-      screenSharingId ? { peerId: screenSharingId, roomId } : roomId
-    );
-  }, [screenSharingId, roomId]);
-
-  useEffect(() => {
-    if (!me || !stream) {
-      console.log("Waiting for peer and stream...");
-      return;
-    }
+    if (!me || !stream) return;
 
     ws.on("user-joined", ({ peerId }) => {
-      console.log("User joined room:", peerId);
-
       setTimeout(() => callPeer(peerId, stream), 500);
     });
-  }, [callPeer, me, stream]);
-
-  console.log("Peers:", peers);
+  }, [callPeer, me, meScreen?.id, stream]);
 
   useEffect(() => {
     return () => {
       me?.destroy();
       stream?.getTracks().forEach((t) => t.stop());
+      stopScreenShare();
     };
   }, []);
 
   return (
     <RoomContext.Provider
-      value={{ ws, me, stream, peers, shareScreen, screenSharingId, setRoomId }}
+      value={{
+        ws,
+        me,
+        stream,
+        peers,
+        stopScreenShare,
+        shareScreen,
+        screenSharingId,
+        setRoomId,
+        meScreen,
+      }}
     >
       {children}
     </RoomContext.Provider>
