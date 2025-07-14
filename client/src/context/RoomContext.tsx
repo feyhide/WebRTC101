@@ -2,6 +2,7 @@
 import Peer, { type MediaConnection } from "peerjs";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useReducer,
@@ -16,6 +17,7 @@ import { peerReducer, type PeerState } from "./peerReducer";
 import { addPeerAction, removePeerAction } from "./peerActions";
 
 const WS = "http://localhost:3000";
+const ws = socketIOClient(WS);
 
 interface RoomContextType {
   ws: Socket;
@@ -32,7 +34,6 @@ interface Props {
 }
 
 const RoomContext = createContext<RoomContextType | null>(null);
-const ws = socketIOClient(WS);
 
 const RoomProvider: React.FC<Props> = ({ children }) => {
   const navigate = useNavigate();
@@ -40,37 +41,9 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
   const [stream, setStream] = useState<MediaStream>();
   const [peers, dispatch] = useReducer(peerReducer, {});
   const [screenSharingId, setScreenSharingId] = useState<string>("");
-  const peerConnections = useRef<Map<string, MediaConnection>>(new Map());
   const [roomId, setRoomId] = useState<string>("");
 
-  const enterRoom = ({ roomId }: { roomId: string }) => {
-    console.log({ roomId });
-    navigate(`/room/${roomId}`);
-  };
-
-  const getUsers = ({
-    roomId,
-    participants,
-  }: {
-    roomId: string;
-    participants: string[];
-  }) => {
-    console.log(`Room:${roomId} has participants as follows`, { participants });
-  };
-
-  const leavedUser = ({ peerId }: { peerId: string }) => {
-    console.log(`User:${peerId} leaved the room`);
-    dispatch(removePeerAction(peerId));
-    peerConnections.current.delete(peerId);
-  };
-
-  const userStartSharing = ({ peerId }: { peerId: string }) => {
-    setScreenSharingId(peerId);
-  };
-
-  const userStopSharing = () => {
-    setScreenSharingId("");
-  };
+  const peerConnections = useRef<Map<string, MediaConnection>>(new Map());
 
   const switchStream = (newStream: MediaStream) => {
     stream?.getTracks().forEach((track) => track.stop());
@@ -119,6 +92,64 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
     }
   };
 
+  const callPeer = useCallback(
+    (peerId: string, localStream: MediaStream) => {
+      if (!me) return;
+      const call = me.call(peerId, localStream);
+      if (!call) {
+        console.warn("Call object is undefined");
+        return;
+      }
+
+      peerConnections.current.set(peerId, call);
+      console.log("Calling peer:", peerId);
+
+      call.on("stream", (peerStream) => {
+        console.log("Got remote stream from:", peerId);
+        dispatch(addPeerAction(peerId, peerStream));
+      });
+
+      call.on("error", (err) => {
+        console.error("Call error:", err);
+      });
+
+      call.on("close", () => {
+        peerConnections.current.delete(peerId);
+        console.log("Call with", peerId, "closed");
+      });
+    },
+    [me, dispatch]
+  );
+
+  const enterRoom = ({ roomId }: { roomId: string }) => {
+    console.log({ roomId });
+    navigate(`/room/${roomId}`);
+  };
+
+  const getUsers = ({
+    roomId,
+    participants,
+  }: {
+    roomId: string;
+    participants: string[];
+  }) => {
+    console.log(`Room:${roomId} has participants as follows`, { participants });
+  };
+
+  const leavedUser = ({ peerId }: { peerId: string }) => {
+    console.log(`User:${peerId} leaved the room`);
+    dispatch(removePeerAction(peerId));
+    peerConnections.current.delete(peerId);
+  };
+
+  const userStartSharing = ({ peerId }: { peerId: string }) => {
+    setScreenSharingId(peerId);
+  };
+
+  const userStopSharing = () => {
+    setScreenSharingId("");
+  };
+
   useEffect(() => {
     const meId = uuidV4();
     console.log("Generated Peer ID:", meId);
@@ -139,6 +170,7 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
         });
 
         peer.on("open", (id) => {
+          setMe(peer);
           console.log("Peer connection opened with ID:", id);
 
           peer.on("call", (call) => {
@@ -155,8 +187,6 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
               peerConnections.current.delete(call.peer);
             });
           });
-
-          setMe(peer);
         });
 
         peer.on("error", (err) => {
@@ -183,13 +213,13 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (screenSharingId) {
-      console.log("sending everyone that i start sharing");
-      ws.emit("start-sharing", { peerId: screenSharingId, roomId });
-    } else {
-      console.log("sending everyone that i stop sharing");
-      ws.emit("stop-sharing", roomId);
-    }
+    if (screenSharingId === "") return;
+
+    console.log("sending everyone that i start sharing or stop");
+    ws.emit(
+      screenSharingId ? "start-sharing" : "stop-sharing",
+      screenSharingId ? { peerId: screenSharingId, roomId } : roomId
+    );
   }, [screenSharingId, roomId]);
 
   useEffect(() => {
@@ -201,34 +231,18 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
     ws.on("user-joined", ({ peerId }) => {
       console.log("User joined room:", peerId);
 
-      setTimeout(() => {
-        const call = me.call(peerId, stream);
-        if (!call) {
-          console.warn("Call object is undefined");
-          return;
-        }
-        peerConnections.current.set(peerId, call);
-
-        console.log("Calling peer:", peerId);
-
-        call.on("stream", (peerStream) => {
-          console.log("Got remote stream from:", peerId);
-          dispatch(addPeerAction(peerId, peerStream));
-        });
-
-        call.on("error", (err) => {
-          console.error("Call error:", err);
-        });
-
-        call.on("close", () => {
-          peerConnections.current.delete(peerId);
-          console.log("Call with", peerId, "closed");
-        });
-      }, 500);
+      setTimeout(() => callPeer(peerId, stream), 500);
     });
-  }, [me, stream]);
+  }, [callPeer, me, stream]);
 
   console.log("Peers:", peers);
+
+  useEffect(() => {
+    return () => {
+      me?.destroy();
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
 
   return (
     <RoomContext.Provider

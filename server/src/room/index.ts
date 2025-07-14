@@ -25,8 +25,14 @@ export const roomHandler = (socket: Socket) => {
       socket.data.roomId = roomId;
       socket.data.peerId = peerId;
 
-      console.log(`user joined the room ${roomId} with peerId ${peerId}`);
       socket.emit("get-users", { roomId, participants: rooms[roomId] });
+
+      const currentSharer = screenSharers[roomId];
+      if (currentSharer) {
+        socket.emit("user-started-sharing", { peerId: currentSharer });
+      }
+
+      console.log(`user joined the room ${roomId} with peerId ${peerId}`);
     }
 
     socket.on("disconnect", () => {
@@ -41,6 +47,11 @@ export const roomHandler = (socket: Socket) => {
   const leaveRoom = ({ roomId, peerId }: IRoomParams) => {
     rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
     socket.to(roomId).emit("user-leaved", { peerId });
+    if (screenSharers[roomId] === peerId) {
+      delete screenSharers[roomId];
+      socket.to(roomId).emit("user-stopped-sharing");
+      console.log(`Screen sharing stopped by ${peerId} on disconnect`);
+    }
   };
 
   const startSharing = ({ peerId, roomId }: IRoomParams) => {
