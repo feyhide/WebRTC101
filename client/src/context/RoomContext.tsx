@@ -16,6 +16,7 @@ import { v4 as uuidV4 } from "uuid";
 import { peerReducer, type PeerState } from "./peerReducer";
 import { addPeerAction, removePeerAction } from "./peerActions";
 import { limitSenderBitrate } from "../helper/VideoBitRateLimiter";
+import { useAdaptiveStream } from "../hooks/useAdaptiveStream";
 
 const WS = "http://localhost:3000";
 const ws = socketIOClient(WS);
@@ -50,6 +51,15 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
   const peerConnections = useRef<Map<string, MediaConnection>>(new Map());
   const screenSocketRef = useRef<Socket | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+
+  useAdaptiveStream({
+    me,
+    stream,
+    screenSharingId,
+    peerConnections,
+    setStream,
+    meScreen,
+  });
 
   // screen impersonating as another cute peer trying to connect
   // little does my app knows how weird this second cute peer is hehe
