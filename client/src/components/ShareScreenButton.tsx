@@ -5,7 +5,7 @@ export default function ShareScreenButton() {
   return (
     <button
       onClick={screenSharingId === meScreen?.id ? stopScreenShare : shareScreen}
-      className="w-fit h-fit rounded-lg px-4 py-2 bg-black/30 text-white"
+      className="w-fit h-fit rounded-lg px-4 py-2 bg-white text-black"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
