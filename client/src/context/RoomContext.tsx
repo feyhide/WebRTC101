@@ -230,7 +230,7 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
     setScreenSharingId("");
   };
 
-  useEffect(() => {
+  const initPeer = async () => {
     const meId = uuidV4();
     console.info(`[Init] Peer ID: ${meId}`);
 
@@ -281,7 +281,9 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
         peer.on("error", (err) => console.error("[Init] Peer error:", err));
       })
       .catch((err) => console.error("[Init] Failed to get user media:", err));
+  };
 
+  useEffect(() => {
     ws.on("room-created", enterRoom);
     ws.on("get-users", getUsers);
     ws.on("user-leaved", leavedUser);
@@ -296,6 +298,11 @@ const RoomProvider: React.FC<Props> = ({ children }) => {
       ws.off("user-stopped-sharing");
     };
   }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
+    initPeer();
+  }, [roomId]);
 
   useEffect(() => {
     if (!me || !stream) return;

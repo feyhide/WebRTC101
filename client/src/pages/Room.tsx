@@ -43,7 +43,7 @@ function Room() {
       </div>
 
       {screenSharingId && (
-        <div className="w-full h-auto bg-black">
+        <div className="relative w-full max-w-[800px] max-h-[65%] bg-black rounded overflow-hidden mx-auto">
           <VideoPlayer
             videoStyling="w-full h-full object-contain"
             stream={screenSharingVideo}
@@ -79,16 +79,16 @@ function Room() {
           )}
         </div>
 
-        <div className={`grid gap-4 grid-cols-2 md:grid-cols-4`}>
+        <div className={`w-full grid gap-4 grid-cols-2 md:grid-cols-4`}>
           <VideoPlayer
-            videoStyling="w-full h-32 bg-black"
+            videoStyling="w-auto max-w-full h-32 bg-black"
             stream={stream}
             label={`Me: ${me?.id}`}
           />
           {paginatedPeers.map(([peerId, peer]) => (
             <VideoPlayer
               key={peerId}
-              videoStyling="w-full h-32 bg-black"
+              videoStyling="w-auto max-w-full h-32 bg-black"
               stream={peer.stream}
               label={`Peer: ${peerId}`}
             />
